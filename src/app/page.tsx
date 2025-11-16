@@ -1,176 +1,154 @@
-// 훅을 사용하므로 "use client"
 'use client'
 
-import React, { useState } from 'react'
-import Chart from '@/components/domain/Chart'
+import React, { useState, useEffect } from 'react'
+import Link from 'next/link'
+// [추가] 삭제 완료 알림을 띄우기 위해 import
 import { useUiStore } from '@/store/uiStore'
-import DebugPanel from '@/components/common/DebugPanel'
-import DemoGuideModal from '@/components/domain/DemoGuideModal'
-// [추가] 4-2에서 만든 상태 배지
-import StatusBadge, { VoteStatus } from '@/components/domain/StatusBadge'
 
-// --- API 및 Web3 시뮬레이션 함수 ---
-// (실제로는 안지영, 유지민, 김다예님 작업과 연동)
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-// (시뮬) 프론트 B (안지영) - Proof 생성 (문서: 3~5초)
-const generateProof_sim = async (): Promise<{
-  proof: string
-  proofMs: number
-}> => {
-  const proofTime = 3000 + Math.random() * 2000 // 3~5초
-  await sleep(proofTime)
-  // (시뮬) 10% 확률로 증명 실패
-  if (Math.random() < 0.1) throw new Error('W3_PROOF_FAILED')
-  return { proof: '0x123abc...', proofMs: Math.round(proofTime) }
+interface PollInfo {
+  id: string
+  title: string
 }
-
-// (시뮬) 백엔드 B (유지민) - Relayer 제출 (문서: 2초)
-const submitToRelayer_sim = async (
-  proof: string
-): Promise<{ txHash: string }> => {
-  await sleep(2000)
-  // (시뮬) 20% 확률로 409 중복 발생
-  if (Math.random() < 0.2) throw new Error('B_409_DUPLICATE')
-  return { txHash: '0xabc...' }
-}
-
-// (시뮬) 블록체인 상태 구독 (프론트 B 또는 백엔드 A)
-const subscribeStatus_sim = (
-  txHash: string,
-  onUpdate: (status: VoteStatus) => void
-) => {
-  // (시뮬) 1:10 시나리오
-  setTimeout(() => onUpdate('validating'), 2000) // 2초 뒤 '검증 (Conf=1)'
-  setTimeout(() => onUpdate('confirmed'), 5000) // 5초 뒤 '영수증 (Conf=2)'
-}
-// --- 시뮬레이션 끝 ---
 
 export default function HomePage() {
-  const { notify, notifyError } = useUiStore()
+  const [pollList, setPollList] = useState<PollInfo[]>([])
+  // [추가] 알림 훅
+  const { notify } = useUiStore()
 
-  // 시연 시나리오의 '상태' 관리
-  const [currentStatus, setCurrentStatus] = useState<VoteStatus>('idle')
-  const [isLoading, setIsLoading] = useState(false)
-  const [debugInfo, setDebugInfo] = useState({
-    wasmMs: 310,
-    network: 'Sepolia (11155111)',
-  })
+  // 페이지 로드 시 localStorage에서 목록 불러오기
+  useEffect(() => {
+    try {
+      const existingPollsRaw = localStorage.getItem('zkpPollsList') || '[]'
+      const existingPolls: PollInfo[] = JSON.parse(existingPollsRaw)
+      setPollList(existingPolls.reverse())
+    } catch (err) {
+      console.error('localStorage 불러오기 실패:', err)
+    }
+  }, []) // [] : 처음 한 번만 실행
 
-  // (시연 0:20) '투표 + 증명 생성' 버튼 클릭 핸들러
-  const handleVoteSubmit = async () => {
-    if (isLoading) return // 중복 클릭 방지
-    setIsLoading(true)
-    setCurrentStatus('idle') // 상태 초기화
+  // --- [★새로운 기능★] ---
+  // 투표 삭제 시뮬레이션 함수
+  const handleDeletePoll = (pollIdToDelete: string) => {
+    // 1. 확인창 띄우기 (실수 방지)
+    if (!confirm('정말로 이 투표를 삭제하시겠습니까?')) {
+      return
+    }
 
     try {
-      // (시연 0:20) 증명 생성
-      setCurrentStatus('generating_proof')
-      notify('증명 생성을 시작합니다... (3~5초 소요)', 'info') // "진행 중" 토스트
+      // 2. 'zkpPollsList' (메인 목록)에서 해당 pollId 제거
+      const existingPollsRaw = localStorage.getItem('zkpPollsList') || '[]'
+      let existingPolls: PollInfo[] = JSON.parse(existingPollsRaw)
+      const updatedPolls = existingPolls.filter(
+        (poll) => poll.id !== pollIdToDelete
+      )
+      localStorage.setItem('zkpPollsList', JSON.stringify(updatedPolls))
 
-      const { proof, proofMs } = await generateProof_sim()
+      // 3. 'poll_...' (상세 정보) 삭제
+      localStorage.removeItem(`poll_${pollIdToDelete}`)
+      // 4. 'voted_...' (투표 기록) 삭제
+      localStorage.removeItem(`voted_${pollIdToDelete}`)
 
-      // 디버그 패널 업데이트
-      setDebugInfo((prev) => ({ ...prev, proofMs }))
+      // 5. UI(React 상태) 즉시 업데이트 (삭제된 목록 반영)
+      setPollList(updatedPolls.reverse()) // reverse() 유지
 
-      // (시연 0:50) Relayer 제출
-      setCurrentStatus('submitting')
-      notify('Relayer로 제출합니다... (가스 0원)', 'info')
-
-      const { txHash } = await submitToRelayer_sim(proof)
-
-      // (시연 1:10) 실시간 상태 확인 (구독)
-      subscribeStatus_sim(txHash, (newStatus) => {
-        setCurrentStatus(newStatus)
-
-        if (newStatus === 'confirmed') {
-          notify('투표가 성공적으로 기록되었습니다!', 'success')
-          setIsLoading(false)
-        }
-      })
-    } catch (error: any) {
-      // (시연 1:40) 모든 실패/중복 처리
-      const errorCode = error.message // "B_409_DUPLICATE" 등
-
-      notifyError(errorCode) // Phase 2에서 만든 에러 배너 띄우기 (1초 내)
-
-      // 상태 배지를 에러 상태로 변경
-      if (errorCode === 'B_409_DUPLICATE') {
-        setCurrentStatus('duplicate') // 409 중복 배지
-      } else {
-        setCurrentStatus('failed') // 기타 실패 배지
-      }
-      setIsLoading(false)
+      notify('투표가 성공적으로 삭제되었습니다.', 'success')
+    } catch (err) {
+      console.error('삭제 중 오류:', err)
+      notify('삭제 중 오류가 발생했습니다.', 'error') // notifyError 대신
     }
   }
+  // --- [★새로운 기능 끝★] ---
+
+  // --- (스타일) ---
+  const listContainerStyle: React.CSSProperties = {
+    maxWidth: '700px',
+    margin: '20px auto',
+  }
+  const listItemStyle: React.CSSProperties = {
+    display: 'block',
+    padding: '15px 20px',
+    border: '1px solid #555',
+    borderRadius: '8px',
+    margin: '10px 0',
+    fontSize: '18px',
+    textDecoration: 'none',
+    color: '#fff',
+    backgroundColor: '#222',
+    transition: 'background-color 0.2s',
+    flexGrow: 1, // [수정] 링크가 남은 공간을 다 차지하도록
+  }
+  const emptyListStyle: React.CSSProperties = {
+    /* (이전과 동일) */
+  }
+
+  // [추가] 삭제 버튼 스타일
+  const deleteButtonStyle: React.CSSProperties = {
+    padding: '10px 15px',
+    fontSize: '14px',
+    backgroundColor: '#D32F2F', // 빨간색
+    color: 'white',
+    border: 'none',
+    borderRadius: '5px',
+    cursor: 'pointer',
+    flexShrink: 0, // [추가] 버튼 크기 줄어들지 않게
+  }
+  // --- (스타일 끝) ---
 
   return (
     <div>
-      <DemoGuideModal />
+      <h1 style={{ textAlign: 'center' }}>ZKP 투표 대시보드 (홈)</h1>
+      <p style={{ textAlign: 'center' }}>
+        "여러 개의 투표 동시 운영" (신규 요구사항)
+      </p>
 
-      <h1>ZKP 투표 데모</h1>
+      <div style={listContainerStyle}>
+        {pollList.length === 0 ? (
+          <div style={emptyListStyle}>{/* ... (이전과 동일) ... */}</div>
+        ) : (
+          pollList.map((poll) => (
+            // --- [★수정된 부분★] ---
+            // <Link>를 <div>로 감싸서 버튼과 가로로 정렬
+            <div
+              key={poll.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                margin: '10px 0',
+              }}
+            >
+              <Link
+                href={`/polls/${poll.id}`}
+                style={listItemStyle}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.backgroundColor = '#333')
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.backgroundColor = '#222')
+                }
+              >
+                {poll.title}
+                <span
+                  style={{ fontSize: '12px', color: '#888', display: 'block' }}
+                >
+                  ID: {poll.id}
+                </span>
+              </Link>
 
-      <div
-        style={{
-          marginTop: '30px',
-          padding: '20px',
-          border: '1px solid #555',
-          borderRadius: '8px',
-        }}
-      >
-        <h3>시연 시나리오 (정은수 - UI/UX)</h3>
-
-        {/* 1. 실시간 상태 배지 */}
-        <div style={{ marginBottom: '20px' }}>
-          <p>실시간 상태 (시나리오 1:10)</p>
-          <StatusBadge status={currentStatus} />
-        </div>
-
-        {/* 2. 메인 버튼 */}
-        <button
-          onClick={handleVoteSubmit}
-          disabled={isLoading}
-          style={{
-            padding: '12px 22px',
-            fontSize: '16px',
-            cursor: isLoading ? 'not-allowed' : 'pointer',
-            backgroundColor: isLoading ? '#555' : '#1976D2',
-            color: 'white',
-            border: 'none',
-            borderRadius: '5px',
-          }}
-        >
-          {isLoading ? '처리 중...' : '투표 + 증명 생성 (시연 시작)'}
-        </button>
-      </div>
-
-      {/* 차트 컴포넌트 */}
-      <Chart />
-
-      {/* 디버그 패널 */}
-      <DebugPanel info={debugInfo} />
-
-      {/* --- Phase 2/3 테스트 섹션 (유지) --- */}
-      <div
-        style={{
-          marginTop: '20px',
-          borderTop: '1px dashed #ccc',
-          paddingTop: '10px',
-          opacity: 0.5,
-        }}
-      >
-        <p>
-          <b>[Phase 2 테스트]</b> 알림 배너 (수동)
-        </p>
-        <button onClick={() => notify('테스트 성공!', 'success')}>성공</button>
-        <button
-          onClick={() => notifyError('B_409_DUPLICATE')}
-          style={{ margin: '0 10px' }}
-        >
-          에러: 중복
-        </button>
-        <button onClick={() => notifyError('W3_NO_GAS')}>에러: 가스</button>
+              {/* [추가] 삭제 버튼 */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation() // (링크 이동 방지)
+                  handleDeletePoll(poll.id)
+                }}
+                style={deleteButtonStyle}
+              >
+                삭제
+              </button>
+            </div>
+            // --- [★수정 끝★] ---
+          ))
+        )}
       </div>
     </div>
   )

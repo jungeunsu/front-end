@@ -6,7 +6,6 @@ import React, { memo } from 'react'
 const MOCK_DATA = [
   { id: 1, option: '찬성', votes: 150 },
   { id: 2, option: '반대', votes: 75 },
-  { id: 3, option: '기권', votes: 20 },
 ]
 
 // 컴포넌트 함수 자체는 수정할 필요가 없습니다.

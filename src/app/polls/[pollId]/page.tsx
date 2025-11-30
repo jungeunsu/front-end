@@ -9,16 +9,23 @@ import { useUiStore } from '@/store/uiStore'
 import DebugPanel from '@/components/common/DebugPanel'
 import StatusBadge, { VoteStatus } from '@/components/domain/StatusBadge'
 
-// --- 시뮬레이션 함수 (로직 유지) ---
+// --- [수정] 시뮬레이션: ZKP 리포트 데이터 반영 (2s ~ 5s) ---
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const generateProof_sim = async (
   voteOption: string
 ): Promise<{ proof: string; proofMs: number }> => {
   console.log(`'${voteOption}' 표에 대한 증명 생성 시작...`)
-  const proofTime = 3000 + Math.random() * 2000
+
+  // v1.2 벤치마크 기반: 평균 2초, 최대 5초 정도로 랜덤 설정
+  // (기존 3~5초 -> 2~5초로 단축하여 실제 체감 성능 반영)
+  const proofTime = 2000 + Math.random() * 3000
+
   await sleep(proofTime)
-  if (Math.random() < 0.1) throw new Error('W3_PROOF_FAILED')
+
+  // 5% 확률로 증명 생성 실패 시뮬레이션 (데모용)
+  if (Math.random() < 0.05) throw new Error('W3_PROOF_FAILED')
+
   return { proof: `0x123...(${voteOption})`, proofMs: Math.round(proofTime) }
 }
 
@@ -26,7 +33,13 @@ const submitToRelayer_sim = async (
   proof: string
 ): Promise<{ txHash: string }> => {
   console.log(`Relayer로 증명(${proof}) 제출...`)
-  await sleep(2000)
+  await sleep(1500) // 네트워크 딜레이 1.5초
+
+  // 5% 확률로 가스/네트워크 에러 시뮬레이션
+  const rand = Math.random()
+  if (rand < 0.05) throw new Error('W3_NO_GAS')
+  if (rand < 0.1) throw new Error('W3_NETWORK_ERROR')
+
   return { txHash: '0x71a2c...9e3f' }
 }
 
@@ -34,8 +47,9 @@ const subscribeStatus_sim = (
   txHash: string,
   onUpdate: (status: VoteStatus) => void
 ) => {
-  setTimeout(() => onUpdate('validating'), 2000)
-  setTimeout(() => onUpdate('confirmed'), 5000)
+  // 블록체인 검증 대기 시간
+  setTimeout(() => onUpdate('validating'), 2000) // 2초 후 검증 중 (Conf=1)
+  setTimeout(() => onUpdate('confirmed'), 5000) // 5초 후 영수증 (Conf=2)
 }
 // --- 시뮬레이션 끝 ---
 
@@ -52,10 +66,14 @@ export default function PollDetailPage() {
   const [pollData, setPollData] = useState<PollData | null>(null)
   const [currentStatus, setCurrentStatus] = useState<VoteStatus>('idle')
   const [isLoading, setIsLoading] = useState(false)
+
+  // [수정] 디버그 정보 초기값 (wasmMs는 보고서 기반 고정값 가정)
   const [debugInfo, setDebugInfo] = useState({
-    wasmMs: 310,
+    wasmMs: 450,
     network: 'Sepolia (11155111)',
+    proofMs: 0,
   })
+
   const [selectedOption, setSelectedOption] = useState<string | null>(null)
   const [hasVoted, setHasVoted] = useState(false)
   const [txHash, setTxHash] = useState<string | null>(null)
@@ -68,10 +86,18 @@ export default function PollDetailPage() {
       if (pollDataRaw) {
         setPollData(JSON.parse(pollDataRaw))
       } else {
-        setPollData(null)
+        // [중요] 모바일/QR 접속 시 데이터가 없으면 임시 데이터 표시 (404 방지)
+        console.log('모바일 접속 감지: 시연용 임시 데이터 사용')
+        setPollData({
+          title: '야식 메뉴 투표 (모바일 시연)',
+          options: ['치킨', '피자', '족발'],
+        })
       }
     } catch (err) {
-      setPollData(null)
+      setPollData({
+        title: '데이터 복구됨',
+        options: ['옵션 A', '옵션 B'],
+      })
     }
 
     const voted = localStorage.getItem(`voted_${pollId}`)
@@ -87,32 +113,41 @@ export default function PollDetailPage() {
       notify('후보를 먼저 선택해주세요.', 'warning')
       return
     }
+    // 1. 중복 투표 체크 (가장 먼저)
     if (hasVoted) {
-      notifyError('B_409_DUPLICATE')
-      setCurrentStatus('duplicate')
+      notifyError('B_409_DUPLICATE') // 배너
+      setCurrentStatus('duplicate') // 배지
       return
     }
     if (isLoading) return
+
     setIsLoading(true)
     setCurrentStatus('idle')
     setTxHash(null)
+    setDebugInfo((prev) => ({ ...prev, proofMs: 0 })) // 초기화
 
     try {
+      // 2. 증명 생성 (2~5초)
       setCurrentStatus('generating_proof')
-      notify('증명 생성을 시작합니다...', 'info')
+      notify('ZKP 증명을 생성 중입니다... (2~5초 소요)', 'info')
+
       const { proof, proofMs } = await generateProof_sim(selectedOption)
+
+      // [수정] 실제 걸린 시간을 디버그 패널에 업데이트
       setDebugInfo((prev) => ({ ...prev, proofMs }))
 
+      // 3. Relayer 제출
       setCurrentStatus('submitting')
-      notify('Relayer로 제출합니다...', 'info')
-      const { txHash: newTxHash } = await submitToRelayer_sim(proof)
+      notify('Relayer로 트랜잭션을 제출합니다...', 'info')
 
+      const { txHash: newTxHash } = await submitToRelayer_sim(proof)
       setTxHash(newTxHash)
 
+      // 4. 상태 구독 (검증 -> 영수증)
       subscribeStatus_sim(newTxHash, (newStatus) => {
         setCurrentStatus(newStatus)
         if (newStatus === 'confirmed') {
-          notify('투표가 성공적으로 기록되었습니다!', 'success')
+          notify('투표가 블록체인에 확정되었습니다!', 'success')
           setIsLoading(false)
           setSelectedOption(null)
           localStorage.setItem(`voted_${pollId}`, 'true')
@@ -121,14 +156,15 @@ export default function PollDetailPage() {
       })
     } catch (error: any) {
       const errorCode = error.message
-      notifyError(errorCode)
+      notifyError(errorCode) // 에러 배너 띄우기 (error-map.json 기반)
+
+      // 상태 배지 업데이트
       setCurrentStatus('failed')
       setIsLoading(false)
     }
   }
 
-  // --- [🎨 스타일 정의] ---
-
+  // --- [스타일 정의] (이전 디자인 유지) ---
   const pageContainerStyle: React.CSSProperties = {
     minHeight: '100vh',
     background: 'radial-gradient(circle at 50% -20%, #1a1f35, #09090b 80%)',
@@ -180,7 +216,7 @@ export default function PollDetailPage() {
       cursor: isLoading ? 'not-allowed' : 'pointer',
       transition: 'all 0.2s ease',
       boxShadow: isSelected ? '0 0 15px rgba(0, 242, 254, 0.3)' : 'none',
-      flex: '1 1 30%', // Grid 느낌을 위한 flex 설정
+      flex: '1 1 30%',
       minWidth: '120px',
     }
   }
@@ -222,21 +258,10 @@ export default function PollDetailPage() {
     transition: 'background 0.2s',
   }
 
-  // 404 상태 스타일
-  if (!pollData) {
-    return (
-      <div style={{ ...pageContainerStyle, justifyContent: 'center' }}>
-        <h2 style={{ color: '#ff3b30' }}>투표를 찾을 수 없습니다 (404)</h2>
-        <Link href="/" style={{ color: '#00f2fe', textDecoration: 'none' }}>
-          &larr; 홈으로 돌아가기
-        </Link>
-      </div>
-    )
-  }
+  if (!pollData) return <div style={{ ...pageContainerStyle }}>Loading...</div>
 
   return (
     <div style={pageContainerStyle}>
-      {/* 애니메이션 키프레임 */}
       <style jsx global>{`
         @keyframes fadeIn {
           from {
@@ -250,9 +275,7 @@ export default function PollDetailPage() {
         }
       `}</style>
 
-      {/* --- 1. 메인 투표 카드 --- */}
       <div style={glassCardStyle}>
-        {/* 상단: 뒤로가기 & QR 버튼 */}
         <div
           style={{
             display: 'flex',
@@ -285,7 +308,6 @@ export default function PollDetailPage() {
           </Link>
         </div>
 
-        {/* 타이틀 영역 */}
         <h1 style={titleStyle}>{pollData.title}</h1>
         <p
           style={{
@@ -298,7 +320,6 @@ export default function PollDetailPage() {
           ID: {pollId}
         </p>
 
-        {/* 후보 선택 영역 */}
         <div style={{ marginBottom: '30px' }}>
           <p style={{ marginBottom: '15px', color: '#ddd', fontWeight: '600' }}>
             1. 투표 항목을 선택하세요
@@ -317,7 +338,6 @@ export default function PollDetailPage() {
           </div>
         </div>
 
-        {/* 구분선 */}
         <div
           style={{
             height: '1px',
@@ -326,14 +346,12 @@ export default function PollDetailPage() {
           }}
         />
 
-        {/* 상태 및 액션 영역 */}
         <div>
           <p style={{ marginBottom: '10px', color: '#ddd', fontWeight: '600' }}>
             2. 진행 상태
           </p>
           <StatusBadge status={currentStatus} />
 
-          {/* 영수증 링크 (성공 시) */}
           {currentStatus === 'confirmed' && txHash && (
             <div
               style={{
@@ -372,7 +390,6 @@ export default function PollDetailPage() {
           )}
         </div>
 
-        {/* 메인 액션 버튼 */}
         <button
           onClick={handleVoteSubmit}
           disabled={!selectedOption || isLoading}
@@ -390,12 +407,10 @@ export default function PollDetailPage() {
         </button>
       </div>
 
-      {/* --- 2. 차트 카드 (분리) --- */}
       <div style={glassCardStyle}>
         <h3 style={{ margin: '0 0 20px 0', color: '#fff' }}>
           📊 실시간 투표 현황
         </h3>
-        {/* Chart 컴포넌트는 내부 스타일이 별도로 있겠지만, 컨테이너는 통일감을 줍니다. */}
         <div
           style={{
             background: 'rgba(0,0,0,0.2)',
@@ -407,7 +422,6 @@ export default function PollDetailPage() {
         </div>
       </div>
 
-      {/* 디버그 패널 */}
       <DebugPanel info={debugInfo} />
     </div>
   )

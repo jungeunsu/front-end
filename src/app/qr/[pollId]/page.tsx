@@ -1,57 +1,100 @@
-// app/qr/[pollId]/page.tsx
-
 'use client'
 
 import React from 'react'
 import QRCode from 'react-qr-code'
 import { useParams } from 'next/navigation'
 
-// 실제 배포 시에는 본인 Vercel 주소로 바꿔야 합니다.
-// (지금은 로컬 테스트용)
-const BASE_URL = 'https://zkp-vote-demo.vercel.app'
-// const BASE_URL = "http://localhost:3000"; // 로컬 테스트 시 주석 해제
+// 배포 / 로컬 자동 감지
+const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
 
-const CONTRACT_ADDRESS = '0xAb5801a7D398351b89E11801Bf7B0328a809Cdd6'
-const ETHERSCAN_URL = `https://sepolia.etherscan.io/address/${CONTRACT_ADDRESS}`
-
-export default function DynamicQrPage() {
+export default function QrPage() {
   const params = useParams()
   const pollId = params.pollId as string
-
-  // 이 투표의 접속 링크 (예: .../polls/poll_abc123)
   const votePageUrl = `${BASE_URL}/polls/${pollId}`
 
   const pageStyle: React.CSSProperties = {
+    minHeight: '100vh',
+    background: 'radial-gradient(circle at 50% -20%, #1a1f35, #09090b 80%)',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: '100vh',
-    textAlign: 'center',
-    gap: '30px',
     padding: '20px',
     fontFamily: 'sans-serif',
-    backgroundColor: '#f5f5f5',
-    color: '#333',
+    color: '#fff',
+    gap: '30px',
   }
 
-  const cardStyle: React.CSSProperties = {
-    backgroundColor: 'white',
+  const glassCardStyle: React.CSSProperties = {
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    backdropFilter: 'blur(16px)',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
+    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
     padding: '30px',
-    borderRadius: '15px',
-    boxShadow: '0 4px 15px rgba(0,0,0,0.1)',
+    borderRadius: '24px',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     gap: '15px',
+    maxWidth: '300px',
+    width: '100%',
+    animation: 'fadeIn 0.6s ease-out',
+  }
+
+  const titleStyle: React.CSSProperties = {
+    fontSize: '2.3rem',
+    fontWeight: '800',
+    marginBottom: '5px',
+    background: 'linear-gradient(to right, #4facfe 0%, #00f2fe 100%)',
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+    textAlign: 'center',
+  }
+
+  const copyBtnStyle: React.CSSProperties = {
+    marginTop: '12px',
+    padding: '8px 14px',
+    background: 'linear-gradient(135deg, #4facfe, #00f2fe)',
+    border: 'none',
+    borderRadius: '10px',
+    color: '#fff',
+    fontSize: '0.85rem',
+    cursor: 'pointer',
+    fontWeight: 600,
+  }
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(votePageUrl)
+    alert('🔗 투표 링크가 복사되었습니다!\n카톡/단체방에 공유해 주세요.')
   }
 
   return (
     <div style={pageStyle}>
-      <h1>🗳️ 실시간 투표 참여 (ID: {pollId})</h1>
-      <p style={{ fontSize: '18px' }}>
-        아래 QR 코드를 스캔하여 투표에 참여하세요.
-      </p>
+      <style jsx global>{`
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+      `}</style>
+
+      <div>
+        <h1 style={titleStyle}>Scan to Vote</h1>
+        <p
+          style={{
+            textAlign: 'center',
+            color: 'rgba(255,255,255,0.6)',
+            fontFamily: 'monospace',
+          }}
+        >
+          Poll ID: {pollId}
+        </p>
+      </div>
 
       <div
         style={{
@@ -61,45 +104,34 @@ export default function DynamicQrPage() {
           gap: '40px',
         }}
       >
-        {/* 1. 투표 참여 QR */}
-        <div style={cardStyle}>
-          <h2 style={{ margin: 0, color: '#1976D2' }}>투표 접속</h2>
-          <div style={{ padding: '10px', background: 'white' }}>
-            <QRCode value={votePageUrl} size={200} />
+        {/* 투표 QR */}
+        <div style={glassCardStyle}>
+          <h2 style={{ margin: 0, color: '#00f2fe', fontSize: '1.2rem' }}>
+            🗳️ 투표 참여하기
+          </h2>
+          <div style={{ padding: 15, background: 'white', borderRadius: 16 }}>
+            <QRCode value={votePageUrl} size={180} />
           </div>
-          <p
-            style={{
-              fontSize: '14px',
-              wordBreak: 'break-all',
-              maxWidth: '250px',
-              color: '#555',
-            }}
-          >
-            {votePageUrl}
-          </p>
-        </div>
 
-        {/* 2. 컨트랙트 주소 QR (신뢰성 강조용) */}
-        <div style={cardStyle}>
-          <h2 style={{ margin: 0, color: '#333' }}>컨트랙트 (Sepolia)</h2>
-          <div style={{ padding: '10px', background: 'white' }}>
-            <QRCode value={ETHERSCAN_URL} size={200} />
-          </div>
-          <p
-            style={{
-              fontSize: '14px',
-              wordBreak: 'break-all',
-              maxWidth: '250px',
-              color: '#555',
-            }}
-          >
-            {CONTRACT_ADDRESS}
-          </p>
+          {/* URL 복사 버튼 */}
+          <button onClick={copyToClipboard} style={copyBtnStyle}>
+            링크 복사 후 단체방에 공유하기 📋
+          </button>
         </div>
       </div>
 
-      <div style={{ marginTop: '20px', fontSize: '14px', color: '#888' }}>
-        * 시연을 위해 Sepolia 테스트넷을 사용합니다.
+      <p
+        style={{
+          fontSize: '13px',
+          marginTop: '15px',
+          color: 'rgba(255,255,255,0.4)',
+        }}
+      >
+        스마트폰으로 스캔하거나 링크를 클릭해 투표에 참여하세요.
+      </p>
+
+      <div style={{ color: '#444', fontSize: '13px', marginTop: '20px' }}>
+        Powered by Zero-Knowledge Proof Voting
       </div>
     </div>
   )

@@ -3,67 +3,84 @@
 import React, { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUiStore } from '@/store/uiStore'
-import Link from 'next/link'
+import { ethers } from 'ethers'
 
-interface PollInfo {
-  id: string
-  title: string
-}
+const CREATE_POLL_URL =
+  'https://my-anon-voting-platfrom2.onrender.com/api/polls'
 
 export default function NewPollPage() {
   const router = useRouter()
   const { notify, notifyError } = useUiStore()
-  const [isLoading, setIsLoading] = useState(false)
 
+  const [isLoading, setIsLoading] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [optionsText, setOptionsText] = useState('')
 
-  // --- (기능 로직은 기존과 동일) ---
-  const handleSubmit_sim = async (e: React.FormEvent) => {
+  // 🔥 투표 생성
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (isLoading) return
 
-    const options = optionsText.split('\n').filter((opt) => opt.trim() !== '')
+    const candidates = optionsText
+      .split('\n')
+      .map((v) => v.trim())
+      .filter((v) => v.length > 0)
 
-    if (!title || options.length < 2) {
-      notifyError('제목과 2개 이상의 후보를 입력해주세요.')
+    if (!title || candidates.length < 2) {
+      notifyError('제목과 후보 2개 이상 입력해주세요.')
       return
     }
 
-    setIsLoading(true)
-    notify('시스템에 투표를 등록 중입니다...', 'info')
-
-    await new Promise((res) => setTimeout(res, 1000))
-
-    const newPollId = `poll_${Math.random().toString(36).substring(2, 9)}`
-
+    // 🦊 지갑 주소 가져오기
+    let creatorWallet = ''
     try {
-      const existingPollsRaw = localStorage.getItem('zkpPollsList') || '[]'
-      const existingPolls: PollInfo[] = JSON.parse(existingPollsRaw)
-      const newPollInfo: PollInfo = { id: newPollId, title: title }
-      existingPolls.push(newPollInfo)
-      localStorage.setItem('zkpPollsList', JSON.stringify(existingPolls))
-      localStorage.setItem(
-        `poll_${newPollId}`,
-        JSON.stringify({
-          title: title,
-          options: options,
-        })
-      )
-    } catch (err) {
-      console.error('localStorage 저장 실패:', err)
-      notifyError('저장소 오류 발생')
+      const provider = new ethers.BrowserProvider(window.ethereum)
+      const accounts = await provider.send('eth_requestAccounts', [])
+      creatorWallet = accounts[0]
+    } catch {
+      notifyError('메타마스크 연결에 실패했습니다.')
+      return
     }
 
-    notify('투표 생성 완료! 상세 페이지로 이동합니다.', 'success')
-    router.push(`/polls/${newPollId}`)
+    const body = {
+      creatorWallet,
+      title,
+      description,
+      candidates: candidates.map((name, idx) => ({
+        id: `opt${idx + 1}`,
+        label: name,
+      })),
+      startTime: new Date().toISOString(),
+      endTime: new Date(Date.now() + 1000 * 60 * 60).toISOString(), // 1시간 뒤 종료
+    }
+
+    setIsLoading(true)
+    notify('투표 생성 중...', 'info')
+
+    try {
+      const res = await fetch(CREATE_POLL_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+
+      const json = await res.json()
+      if (!json.success) throw new Error(json.message)
+
+      const newPollId = json.data.pollId
+      notify('투표 생성 완료!', 'success')
+      router.push(`/polls/${newPollId}`)
+    } catch (err: any) {
+      console.error(err)
+      notifyError(err.message || '투표 생성 실패')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
-  // --- [🎨 화려한 스타일 정의] ---
-
-  // 1. 전체 배경
-  const pageContainerStyle: React.CSSProperties = {
+  // 🎨 스타일
+  const pageStyle: React.CSSProperties = {
     minHeight: '100vh',
     background: 'radial-gradient(circle at 50% -20%, #1a1f35, #09090b 80%)',
     display: 'flex',
@@ -74,8 +91,7 @@ export default function NewPollPage() {
     color: '#fff',
   }
 
-  // 2. 글래스 카드
-  const glassCardStyle: React.CSSProperties = {
+  const cardStyle: React.CSSProperties = {
     width: '100%',
     maxWidth: '600px',
     padding: '40px',
@@ -84,32 +100,26 @@ export default function NewPollPage() {
     backdropFilter: 'blur(16px)',
     border: '1px solid rgba(255, 255, 255, 0.08)',
     boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-    animation: 'slideUp 0.6s ease-out',
   }
 
-  // 3. 네온 타이틀
   const titleStyle: React.CSSProperties = {
     fontSize: '2rem',
-    fontWeight: '800',
+    fontWeight: 800,
     textAlign: 'center',
     marginBottom: '10px',
     background: 'linear-gradient(to right, #4facfe 0%, #00f2fe 100%)',
     WebkitBackgroundClip: 'text',
     WebkitTextFillColor: 'transparent',
-    textShadow: '0 0 20px rgba(79, 172, 254, 0.4)',
   }
 
-  // 4. 입력창 라벨
   const labelStyle: React.CSSProperties = {
     display: 'block',
     fontSize: '0.9rem',
-    fontWeight: '600',
+    fontWeight: 600,
     color: 'rgba(255,255,255,0.7)',
     marginBottom: '8px',
-    letterSpacing: '0.5px',
   }
 
-  // 5. 사이버펑크 입력창
   const inputStyle: React.CSSProperties = {
     width: '100%',
     padding: '16px',
@@ -119,11 +129,8 @@ export default function NewPollPage() {
     borderRadius: '12px',
     color: '#fff',
     outline: 'none',
-    transition: 'all 0.3s ease',
-    boxSizing: 'border-box',
   }
 
-  // 6. 네온 버튼
   const buttonStyle: React.CSSProperties = {
     width: '100%',
     padding: '18px',
@@ -137,144 +144,55 @@ export default function NewPollPage() {
     border: 'none',
     borderRadius: '12px',
     cursor: isLoading ? 'not-allowed' : 'pointer',
-    boxShadow: isLoading ? 'none' : '0 10px 20px -5px rgba(0, 242, 254, 0.4)',
-    transition: 'transform 0.2s, box-shadow 0.2s',
   }
 
   return (
-    <div style={pageContainerStyle}>
-      <style jsx global>{`
-        @keyframes slideUp {
-          from {
-            opacity: 0;
-            transform: translateY(30px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        .input-focus:focus {
-          border-color: #00f2fe !important;
-          box-shadow: 0 0 15px rgba(0, 242, 254, 0.2);
-          background: rgba(0, 0, 0, 0.5) !important;
-        }
-      `}</style>
-
-      <div style={glassCardStyle}>
-        {/* 뒤로가기 버튼 */}
-        <Link
-          href="/"
-          style={{
-            textDecoration: 'none',
-            display: 'inline-block',
-            marginBottom: '20px',
-          }}
-        >
-          <span
-            style={{
-              color: 'rgba(255,255,255,0.5)',
-              fontSize: '14px',
-              transition: 'color 0.2s',
-            }}
-          >
-            &larr; 대시보드로 돌아가기
-          </span>
-        </Link>
-
+    <div style={pageStyle}>
+      <div style={cardStyle}>
         <h1 style={titleStyle}>새 투표 생성</h1>
-        <p
-          style={{
-            textAlign: 'center',
-            color: 'rgba(255,255,255,0.5)',
-            marginBottom: '40px',
-          }}
-        >
-          관리자 권한으로 새로운 ZKP 투표를 생성합니다.
-        </p>
 
         <form
-          onSubmit={handleSubmit_sim}
+          onSubmit={handleSubmit}
           style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}
         >
-          {/* 제목 입력 */}
+          {/* 제목 */}
           <div>
-            <label htmlFor="title" style={labelStyle}>
-              투표 제목
-            </label>
+            <label style={labelStyle}>투표 제목</label>
             <input
-              id="title"
               type="text"
-              className="input-focus"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               style={inputStyle}
-              placeholder="예: 오늘 점심 메뉴는?"
             />
           </div>
 
-          {/* 설명 입력 */}
+          {/* 설명 */}
           <div>
-            <label htmlFor="description" style={labelStyle}>
-              투표 설명 (선택)
-            </label>
+            <label style={labelStyle}>투표 설명 (선택)</label>
             <textarea
-              id="description"
-              className="input-focus"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              style={{ ...inputStyle, minHeight: '100px', resize: 'vertical' }}
-              placeholder="투표의 목적이나 설명을 간단히 적어주세요."
+              style={{ ...inputStyle, minHeight: '100px' }}
             />
           </div>
 
-          {/* 후보 목록 입력 */}
+          {/* 후보 */}
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <label htmlFor="options" style={labelStyle}>
-                후보 목록
-              </label>
-              <span style={{ fontSize: '12px', color: '#00f2fe' }}>
-                최소 2개 이상
-              </span>
-            </div>
+            <label style={labelStyle}>후보 목록 (줄바꿈으로 구분)</label>
             <textarea
-              id="options"
-              className="input-focus"
               value={optionsText}
               onChange={(e) => setOptionsText(e.target.value)}
               style={{
                 ...inputStyle,
-                minHeight: '150px',
+                minHeight: '160px',
                 fontFamily: 'monospace',
               }}
-              placeholder={'예:\n마라탕\n떡볶이\n라면'}
+              placeholder={'예:\n수학\n과학\n역사'}
             />
-            <p
-              style={{
-                fontSize: '12px',
-                color: 'rgba(255,255,255,0.4)',
-                marginTop: '8px',
-              }}
-            >
-              * 각 후보는 <strong>줄바꿈(Enter)</strong>으로 구분됩니다.
-            </p>
           </div>
 
-          {/* 제출 버튼 */}
-          <button
-            type="submit"
-            disabled={isLoading}
-            style={buttonStyle}
-            onMouseEnter={(e) => {
-              if (!isLoading)
-                e.currentTarget.style.transform = 'translateY(-2px)'
-            }}
-            onMouseLeave={(e) => {
-              if (!isLoading) e.currentTarget.style.transform = 'translateY(0)'
-            }}
-          >
-            {isLoading ? '컨트랙트 배포 중...' : '투표 시작하기 '}
+          <button type="submit" disabled={isLoading} style={buttonStyle}>
+            {isLoading ? '투표 생성 중...' : '투표 생성하기 🚀'}
           </button>
         </form>
       </div>

@@ -11,7 +11,6 @@ const Chart: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // 📌 API 호출
   const fetchResults = async () => {
     if (!pollId) return
     try {
@@ -19,13 +18,11 @@ const Chart: React.FC = () => {
       setData(res)
       setError(null)
     } catch (err) {
-      console.warn('차트 API 실패 - 시연용 안전 모드로 변경')
+      console.warn('차트 API 실패 — 시연 모드 전환')
       setError('집계 조회 실패 (시연 모드)')
       setData({
         pollId,
-        title: '시연 모드 - 차트',
         totalVotes: 0,
-        timestamp: '',
         results: [],
       })
     } finally {
@@ -33,12 +30,10 @@ const Chart: React.FC = () => {
     }
   }
 
-  // 1️⃣ 첫 로딩
   useEffect(() => {
     fetchResults()
   }, [pollId])
 
-  // 2️⃣ 5초 간격 자동 새로고침
   useEffect(() => {
     const interval = setInterval(fetchResults, 5000)
     return () => clearInterval(interval)
@@ -60,7 +55,7 @@ const Chart: React.FC = () => {
     transition: 'width .4s ease',
   })
 
-  if (loading) return <div style={wrapperStyle}>📊 차트 불러오는 중...</div>
+  if (loading) return <div style={wrapperStyle}>📊 집계 불러오는 중...</div>
 
   if (!data)
     return <div style={wrapperStyle}>차트 데이터를 찾을 수 없습니다.</div>
@@ -69,18 +64,17 @@ const Chart: React.FC = () => {
     <div style={wrapperStyle}>
       <h3 style={{ marginBottom: 12 }}>📊 실시간 투표 현황</h3>
 
-      {/* 투표가 하나도 없을 때 */}
       {data.totalVotes === 0 && (
         <p style={{ fontSize: 13, color: '#bbb' }}>
           아직 투표가 없습니다. 첫 표를 남겨보세요!
         </p>
       )}
 
-      {/* 결과 리스트 */}
       {data.results.map((item) => {
-        const count = item.count
+        const count = item.votes
         const percent =
           data.totalVotes > 0 ? Math.round((count / data.totalVotes) * 100) : 0
+
         return (
           <div key={item.candidate} style={{ marginBottom: 15 }}>
             <div
@@ -92,7 +86,7 @@ const Chart: React.FC = () => {
                 justifyContent: 'space-between',
               }}
             >
-              <span>{item.candidate}</span>
+              <span>{item.label}</span>
               <span>
                 {count}표 ({percent}%)
               </span>

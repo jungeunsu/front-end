@@ -5,7 +5,8 @@ import QRCode from 'react-qr-code'
 import { useParams } from 'next/navigation'
 
 // 배포 / 로컬 자동 감지
-const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+const BASE_URL =
+  process.env.NEXT_PUBLIC_BASE_URL || 'https://front-end-ygzm.vercel.app/'
 
 export default function QrPage() {
   const params = useParams()

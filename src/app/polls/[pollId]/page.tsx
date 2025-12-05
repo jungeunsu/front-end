@@ -15,7 +15,7 @@ const SUBMIT_VOTE_URL =
 const CONTRACT_ADDRESS = '0x6f75A7759b65C951E256BF9A90B7b1eE769ACD67'
 const ETHERSCAN_URL = `https://sepolia.etherscan.io/address/${CONTRACT_ADDRESS}`
 
-// 📌 실시간 차트 추가
+// 📌 실시간 차트
 import Chart from '@/components/domain/Chart'
 
 declare global {
@@ -24,11 +24,21 @@ declare global {
   }
 }
 
-// ZKP 증명 시뮬레이션
+// ------------------------
+// 🔥 수정된 부분 1: nullifierHash 더미 생성 함수
+// ------------------------
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-const generateProof_sim = async () => {
-  await sleep(1200 + Math.random() * 1200)
-  return { proof: '0x_dummy_proof' }
+
+async function generateProof_sim(walletAddress: string, pollId: string) {
+  await sleep(800)
+
+  // 더미 nullifierHash = 지갑주소 + pollId 기반으로 유니크하게 생성
+  const hash = btoa(walletAddress + pollId + Date.now()).slice(0, 32)
+
+  return {
+    proof: '0x_dummy_proof',
+    nullifierHash: `hash_${hash}`,
+  }
 }
 
 export default function PollDetailPage() {
@@ -77,7 +87,7 @@ export default function PollDetailPage() {
     load()
   }, [pollId])
 
-  // 🦊 지갑 연결
+  // 🦊 메타마스크 연결
   const handleConnectWallet = async () => {
     try {
       const provider = new ethers.BrowserProvider(window.ethereum)
@@ -91,23 +101,33 @@ export default function PollDetailPage() {
 
   // 🚀 투표 제출
   const handleSubmit = async () => {
-    if (!walletAddress) return notify('지갑을 연결하세요', 'warning')
-    if (!selectedOption) return notify('후보를 선택하세요', 'warning')
+    if (!walletAddress) return notifyError('지갑을 연결하세요')
+    if (!selectedOption) return notifyError('후보를 선택하세요')
 
     setIsSubmitting(true)
     setStatus('증명중')
 
     try {
-      await generateProof_sim()
+      // -----------------------
+      // 🔥 수정된 부분 2: nullifierHash 생성
+      // -----------------------
+      const proofResult = await generateProof_sim(walletAddress, pollId)
+      const nullifierHash = proofResult.nullifierHash
+
       setStatus('제출중')
 
+      // 기존 txHash 유지
       const txHash =
         '0x0000000000000000000000000000000000000000000000000000000000000000'
 
+      // -----------------------
+      // 🔥 수정된 부분 3: payload에 nullifierHash 추가
+      // -----------------------
       const payload = {
         pollId,
         walletAddress,
         candidate: selectedOption,
+        nullifierHash,
         txHash,
       }
 
@@ -123,7 +143,7 @@ export default function PollDetailPage() {
 
       if (!json.success) throw new Error(json.message)
 
-      await sleep(800)
+      await sleep(500)
       setStatus('영수증')
       notify('투표 완료!', 'success')
     } catch (err: any) {
@@ -146,14 +166,6 @@ export default function PollDetailPage() {
     영수증: '#2ecc71',
     실패: '#e74c3c',
   }
-  const badgeStyle: React.CSSProperties = {
-    padding: '10px 16px',
-    borderRadius: '12px',
-    textAlign: 'center',
-    background: badge[status],
-    fontWeight: 700,
-    marginTop: 15,
-  }
 
   return (
     <div
@@ -163,10 +175,6 @@ export default function PollDetailPage() {
         color: '#fff',
         padding: '40px 20px',
         fontFamily: 'sans-serif',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: '30px',
       }}
     >
       <div
@@ -177,23 +185,28 @@ export default function PollDetailPage() {
           borderRadius: '24px',
           background: 'rgba(255, 255, 255, 0.03)',
           border: '1px solid rgba(255, 255, 255, 0.08)',
-          backdropFilter: 'blur(16px)',
         }}
       >
         <h1 style={{ textAlign: 'center', fontSize: '2rem', fontWeight: 800 }}>
           {pollData.title}
         </h1>
-        <p style={{ textAlign: 'center', opacity: 0.7 }}>
-          {pollData.description}
-        </p>
 
         {/* 상태 배지 */}
-        <div style={badgeStyle}>
+        <div
+          style={{
+            padding: '10px 16px',
+            borderRadius: '12px',
+            textAlign: 'center',
+            background: badge[status],
+            fontWeight: 700,
+            marginTop: 15,
+          }}
+        >
           {status}
           {status === '실패' && errorMsg ? ` — ${errorMsg}` : ''}
         </div>
 
-        {/* 후보 목록 */}
+        {/* 후보 선택 */}
         <div
           style={{
             marginTop: 20,
@@ -214,10 +227,6 @@ export default function PollDetailPage() {
                   selectedOption === c.id
                     ? '1px solid #00f2fe'
                     : '1px solid rgba(255,255,255,0.1)',
-                background:
-                  selectedOption === c.id
-                    ? 'rgba(0,242,254,0.15)'
-                    : 'transparent',
               }}
             >
               {c.label}
@@ -225,73 +234,23 @@ export default function PollDetailPage() {
           ))}
         </div>
 
-        {/* 지갑 연결 / 제출 */}
+        {/* 연결된 지갑 */}
         {!walletAddress ? (
-          <button
-            onClick={handleConnectWallet}
-            style={{
-              width: '100%',
-              padding: 16,
-              marginTop: 26,
-              borderRadius: 12,
-              border: 'none',
-              background: 'linear-gradient(135deg, #4facfe, #00f2fe)',
-              color: '#fff',
-              cursor: 'pointer',
-            }}
-          >
-            🦊 메타마스크 연결
-          </button>
+          <button onClick={handleConnectWallet}>🦊 메타마스크 연결</button>
         ) : (
           <>
-            <div
-              style={{
-                marginTop: 26,
-                marginBottom: 10,
-                padding: 14,
-                borderRadius: 12,
-                textAlign: 'center',
-                background: 'rgba(255,255,255,0.07)',
-                border: '1px solid rgba(255,255,255,0.15)',
-                color: '#00f2fe',
-                fontWeight: 700,
-              }}
-            >
+            <div style={{ marginTop: 20, marginBottom: 10 }}>
               연결됨: {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
             </div>
 
-            <button
-              onClick={handleSubmit}
-              disabled={isSubmitting}
-              style={{
-                width: '100%',
-                padding: 16,
-                borderRadius: 12,
-                border: 'none',
-                background: isSubmitting
-                  ? '#666'
-                  : 'linear-gradient(135deg, #4facfe, #00f2fe)',
-                color: '#fff',
-                cursor: isSubmitting ? 'not-allowed' : 'pointer',
-              }}
-            >
+            <button onClick={handleSubmit} disabled={isSubmitting}>
               {isSubmitting ? '제출 중...' : '투표 + 제출 🚀'}
             </button>
 
             {status === '영수증' && (
               <button
                 onClick={() => window.open(ETHERSCAN_URL, '_blank')}
-                style={{
-                  width: '100%',
-                  padding: 14,
-                  marginTop: 18,
-                  borderRadius: 12,
-                  border: 'none',
-                  background: 'linear-gradient(135deg, #26de81, #20bf6b)',
-                  color: '#fff',
-                  cursor: 'pointer',
-                  fontWeight: 700,
-                }}
+                style={{ marginTop: 18 }}
               >
                 🧾 영수증 보기 (Etherscan)
               </button>
@@ -300,14 +259,10 @@ export default function PollDetailPage() {
         )}
       </div>
 
-      {/* 🔥 실시간 결과 차트 추가 */}
+      {/* 🔥 실시간 차트 */}
       <Chart />
 
-      {/* QR 공유 */}
-      <Link
-        href={`/qr/${pollId}`}
-        style={{ textDecoration: 'none', color: '#00f2fe' }}
-      >
+      <Link href={`/qr/${pollId}`} style={{ color: '#00f2fe', marginTop: 20 }}>
         QR 코드 공유하기 🔗
       </Link>
     </div>

@@ -6,17 +6,14 @@ import Link from 'next/link'
 import { ethers } from 'ethers'
 import { useUiStore } from '@/store/uiStore'
 import { getPollPublic, PollPublic } from '@/lib/api'
-
-// 투표 제출 API
-const SUBMIT_VOTE_URL =
-  'https://my-anon-voting-platfrom2.onrender.com/api/vote/create'
-
-// 🔥 Etherscan 컨트랙트 주소
-const CONTRACT_ADDRESS = '0x6f75A7759b65C951E256BF9A90B7b1eE769ACD67'
-const ETHERSCAN_URL = `https://sepolia.etherscan.io/address/${CONTRACT_ADDRESS}`
-
-// 📌 실시간 차트
 import Chart from '@/components/domain/Chart'
+
+const CONTRACT_ADDRESS = '0x6f75A7759b65C951E256BF9A90B7b1eE769ACD67'
+import VotingABI from '@/lib/abi/Voting.json'
+
+// 백엔드 DB 저장 API
+const SAVE_DB_URL =
+  'https://my-anon-voting-platfrom2.onrender.com/api/vote/create'
 
 declare global {
   interface Window {
@@ -24,52 +21,128 @@ declare global {
   }
 }
 
-// ------------------------
-// 🔥 수정된 부분 1: nullifierHash 더미 생성 함수
-// ------------------------
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-async function generateProof_sim(walletAddress: string, pollId: string) {
-  await sleep(800)
-
-  // 더미 nullifierHash = 지갑주소 + pollId 기반으로 유니크하게 생성
-  const hash = btoa(walletAddress + pollId + Date.now()).slice(0, 32)
-
+function to3Bits(n: number) {
   return {
-    proof: '0x_dummy_proof',
-    nullifierHash: `hash_${hash}`,
+    bit0: n & 1,
+    bit1: (n >> 1) & 1,
+    bit2: (n >> 2) & 1,
   }
 }
 
+function randomFieldString() {
+  const arr = new Uint32Array(1)
+  crypto.getRandomValues(arr)
+  return arr[0].toString()
+}
+
+async function uuidToField(uuid: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(uuid)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+
+  const hex = Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+
+  const FIELD = BigInt(
+    '21888242871839275222246405745257275088548364400416034343698204186575808495617'
+  )
+
+  return (BigInt('0x' + hex) % FIELD).toString()
+}
+
+type ZkProofResult = { ms: number; proof: any; publicSignals: string[] }
+
+async function generateProof_zk(
+  voteIndex: number,
+  pollIdSignal: string
+): Promise<ZkProofResult> {
+  return new Promise((resolve, reject) => {
+    try {
+      const worker = new Worker('/workers/proof.worker.js')
+
+      worker.onmessage = (e: MessageEvent) => {
+        const data = e.data
+
+        if (!data.ok) reject(new Error(data.error))
+        else {
+          resolve({
+            ms: data.ms,
+            proof:
+              typeof data.proof === 'string'
+                ? JSON.parse(data.proof)
+                : data.proof,
+            publicSignals: data.publicSignals || [],
+          })
+        }
+        worker.terminate()
+      }
+
+      worker.onerror = () => {
+        reject(new Error('ZKP Worker 실행 오류'))
+        worker.terminate()
+      }
+
+      const { bit0, bit1, bit2 } = to3Bits(voteIndex)
+
+      const input = {
+        vote: voteIndex,
+        voteBit0: bit0,
+        voteBit1: bit1,
+        voteBit2: bit2,
+        salt: randomFieldString(),
+        nullifierSecret: randomFieldString(),
+        pollId: pollIdSignal,
+        pathElements: Array(14).fill('0'),
+        pathIndex: Array(14).fill('0'),
+      }
+
+      worker.postMessage({
+        input,
+        wasmPath: '/zkp/vote.wasm',
+        zkeyPath: '/zkp/vote_final.zkey',
+      })
+    } catch (e) {
+      reject(e)
+    }
+  })
+}
+
+// -------------------------------------------------------
+// ⭐ PollDetailPage 컴포넌트
+// -------------------------------------------------------
 export default function PollDetailPage() {
   const params = useParams()
   const pollId = params.pollId as string
 
   const { notify, notifyError } = useUiStore()
+
   const [pollData, setPollData] = useState<PollPublic | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedOption, setSelectedOption] = useState<string | null>(null)
   const [walletAddress, setWalletAddress] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-
-  // 🌟 상태 배지
   const [status, setStatus] = useState<
     '대기' | '증명중' | '제출중' | '검증중' | '영수증' | '실패'
   >('대기')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  // 투표 정보 가져오기
+  // -------------------------
+  // 투표 정보 로드
+  // -------------------------
   useEffect(() => {
     async function load() {
       try {
         const data = await getPollPublic(pollId)
         setPollData(data)
       } catch {
-        notifyError('백엔드 연결 실패 — Demo 화면 표시')
+        notifyError('백엔드 연결 실패 — Demo 모드입니다.')
         setPollData({
           pollId,
           title: 'Demo Poll',
-          description: '백엔드 연결 실패로 데모 화면 표시',
+          description: '데모 화면입니다.',
           candidates: [
             { id: '1', label: '치킨' },
             { id: '2', label: '피자' },
@@ -87,74 +160,125 @@ export default function PollDetailPage() {
     load()
   }, [pollId])
 
+  // -------------------------
   // 🦊 메타마스크 연결
+  // -------------------------
   const handleConnectWallet = async () => {
     try {
       const provider = new ethers.BrowserProvider(window.ethereum)
       const accounts = await provider.send('eth_requestAccounts', [])
+
       setWalletAddress(accounts[0])
-      notify('지갑 연결 완료', 'success')
+      notify('지갑 연결 완료!', 'success')
     } catch {
       notifyError('지갑 연결 실패')
     }
   }
 
-  // 🚀 투표 제출
+  // 지갑 다시 선택
+  const handleReconnectWallet = async () => {
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum)
+      await provider.send('wallet_requestPermissions', [{ eth_accounts: {} }])
+      const accounts = await provider.send('eth_requestAccounts', [])
+      setWalletAddress(accounts[0])
+      notify('지갑이 다시 연결되었습니다!', 'success')
+    } catch {
+      notifyError('지갑 재연결 실패')
+    }
+  }
+
+  // -------------------------
+  // ⭐ 투표 제출 (온체인 + DB 저장)
+  // -------------------------
   const handleSubmit = async () => {
     if (!walletAddress) return notifyError('지갑을 연결하세요')
     if (!selectedOption) return notifyError('후보를 선택하세요')
+    if (!pollData) return notifyError('투표 정보를 불러오지 못함')
+
+    const voteIndex = pollData.candidates.findIndex(
+      (c) => c.id === selectedOption
+    )
+    if (voteIndex < 0) return notifyError('선택한 후보 오류')
 
     setIsSubmitting(true)
     setStatus('증명중')
 
     try {
-      // -----------------------
-      // 🔥 수정된 부분 2: nullifierHash 생성
-      // -----------------------
-      const proofResult = await generateProof_sim(walletAddress, pollId)
-      const nullifierHash = proofResult.nullifierHash
+      const pollIdSignal = await uuidToField(pollId)
+
+      const { proof, publicSignals } = await generateProof_zk(
+        voteIndex,
+        pollIdSignal
+      )
+
+      const [root, pollId_from_proof, nullifierHash, voteCommitment] =
+        publicSignals
 
       setStatus('제출중')
 
-      // 기존 txHash 유지
-      const txHash =
-        '0x0000000000000000000000000000000000000000000000000000000000000000'
+      // -------------------------------------------------------
+      // ⭐ Solidity에 맞게 proof 배열 형태 변환
+      // -------------------------------------------------------
+      const pA = [proof.pi_a[0], proof.pi_a[1]]
+      const pB = [
+        [proof.pi_b[0][0], proof.pi_b[0][1]],
+        [proof.pi_b[1][0], proof.pi_b[1][1]],
+      ]
+      const pC = [proof.pi_c[0], proof.pi_c[1]]
 
-      // -----------------------
-      // 🔥 수정된 부분 3: payload에 nullifierHash 추가
-      // -----------------------
-      const payload = {
-        pollId,
-        walletAddress,
-        candidate: selectedOption,
+      const provider = new ethers.BrowserProvider(window.ethereum)
+      const signer = await provider.getSigner()
+
+      const votingContract = new ethers.Contract(
+        CONTRACT_ADDRESS,
+        VotingABI,
+        signer
+      )
+
+      // ⭐ 스마트컨트랙트 vote 실행
+      const tx = await votingContract.vote(voteIndex, pA, pB, pC, [
+        root,
+        pollId_from_proof,
         nullifierHash,
-        txHash,
-      }
+        voteCommitment,
+      ])
 
-      const res = await fetch(SUBMIT_VOTE_URL, {
+      setStatus('검증중')
+      await tx.wait()
+
+      // ------------------------------
+      // ⭐ DB 저장
+      // ------------------------------
+      const res = await fetch(SAVE_DB_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          pollId,
+          walletAddress,
+          voteIndex,
+          nullifierHash,
+        }),
       })
 
       const json = await res.json()
-
-      setStatus('검증중')
-
       if (!json.success) throw new Error(json.message)
 
-      await sleep(500)
+      notify('투표 완료(ZKP + 온체인 성공)!', 'success')
       setStatus('영수증')
-      notify('투표 완료!', 'success')
     } catch (err: any) {
+      console.error(err)
       setStatus('실패')
-      setErrorMsg(err?.message || '알 수 없는 오류')
-      notifyError(err?.message || '투표 실패')
+      setErrorMsg(err.message)
+      notifyError(err.message)
     } finally {
       setIsSubmitting(false)
     }
   }
 
+  // ---------------------------------------------
+  // UI 렌더링
+  // ---------------------------------------------
   if (loading || !pollData)
     return <div style={{ color: 'white', padding: 40 }}>Loading...</div>
 
@@ -174,24 +298,22 @@ export default function PollDetailPage() {
         background: 'radial-gradient(circle at 50% -20%, #1a1f35, #09090b 80%)',
         color: '#fff',
         padding: '40px 20px',
-        fontFamily: 'sans-serif',
       }}
     >
       <div
         style={{
-          width: '100%',
           maxWidth: '720px',
+          margin: '0 auto',
           padding: '40px',
           borderRadius: '24px',
-          background: 'rgba(255, 255, 255, 0.03)',
-          border: '1px solid rgba(255, 255, 255, 0.08)',
+          background: 'rgba(255,255,255,0.03)',
+          border: '1px solid rgba(255,255,255,0.08)',
         }}
       >
-        <h1 style={{ textAlign: 'center', fontSize: '2rem', fontWeight: 800 }}>
+        <h1 style={{ textAlign: 'center', fontSize: '2rem' }}>
           {pollData.title}
         </h1>
 
-        {/* 상태 배지 */}
         <div
           style={{
             padding: '10px 16px',
@@ -203,10 +325,8 @@ export default function PollDetailPage() {
           }}
         >
           {status}
-          {status === '실패' && errorMsg ? ` — ${errorMsg}` : ''}
         </div>
 
-        {/* 후보 선택 */}
         <div
           style={{
             marginTop: 20,
@@ -234,32 +354,30 @@ export default function PollDetailPage() {
           ))}
         </div>
 
-        {/* 연결된 지갑 */}
         {!walletAddress ? (
           <button onClick={handleConnectWallet}>🦊 메타마스크 연결</button>
         ) : (
           <>
-            <div style={{ marginTop: 20, marginBottom: 10 }}>
-              연결됨: {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+            <div style={{ marginTop: 20 }}>
+              연결됨: {walletAddress.slice(0, 6)}...
+              {walletAddress.slice(-4)}
             </div>
 
-            <button onClick={handleSubmit} disabled={isSubmitting}>
-              {isSubmitting ? '제출 중...' : '투표 + 제출 🚀'}
+            <button onClick={handleReconnectWallet} style={{ marginTop: 10 }}>
+              지갑 다시 선택하기 🔄
             </button>
 
-            {status === '영수증' && (
-              <button
-                onClick={() => window.open(ETHERSCAN_URL, '_blank')}
-                style={{ marginTop: 18 }}
-              >
-                🧾 영수증 보기 (Etherscan)
-              </button>
-            )}
+            <button
+              onClick={handleSubmit}
+              disabled={isSubmitting}
+              style={{ marginTop: 10 }}
+            >
+              {isSubmitting ? '제출 중...' : '투표 + ZKP 제출 🚀'}
+            </button>
           </>
         )}
       </div>
 
-      {/* 🔥 실시간 차트 */}
       <Chart />
 
       <Link href={`/qr/${pollId}`} style={{ color: '#00f2fe', marginTop: 20 }}>

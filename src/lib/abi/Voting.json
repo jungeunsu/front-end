@@ -1,0 +1,73 @@
+[
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_pollId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string[]",
+        "name": "proposalNames",
+        "type": "string[]"
+      },
+      {
+        "internalType": "address",
+        "name": "verifierAddress",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "proposalId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256[2]",
+        "name": "pA",
+        "type": "uint256[2]"
+      },
+      {
+        "internalType": "uint256[2][2]",
+        "name": "pB",
+        "type": "uint256[2][2]"
+      },
+      {
+        "internalType": "uint256[2]",
+        "name": "pC",
+        "type": "uint256[2]"
+      },
+      {
+        "internalType": "uint256[4]",
+        "name": "pubSignals",
+        "type": "uint256[4]"
+      }
+    ],
+    "name": "vote",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "uint256", "name": "id", "type": "uint256" }],
+    "name": "getProposal",
+    "outputs": [
+      { "internalType": "string", "name": "name", "type": "string" },
+      { "internalType": "uint256", "name": "votes", "type": "uint256" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "pollId",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]

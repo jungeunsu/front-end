@@ -37,6 +37,7 @@ export interface PollResult {
 async function fetchAPI(endpoint: string, options: RequestInit = {}) {
   const res = await fetch(`${API_BASE_URL}${endpoint}`, {
     headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
     ...options,
   })
 
@@ -48,8 +49,25 @@ async function fetchAPI(endpoint: string, options: RequestInit = {}) {
   return json.data
 }
 
+// ------------------ UUID → ZKP FIELD 변환 ------------------
+async function uuidToField(uuid: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(uuid)
+  const buffer = await crypto.subtle.digest('SHA-256', data)
+
+  const hex = Array.from(new Uint8Array(buffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+
+  const FIELD = BigInt(
+    '21888242871839275222246405745257275088548364400416034343698204186575808495617'
+  )
+
+  return (BigInt('0x' + hex) % FIELD).toString()
+}
+
 // -------------------------------------------------------------
-// 📌 투표 목록 (전체 공개)
+// 📌 투표 목록
 // GET /api/polls
 // -------------------------------------------------------------
 export async function getPolls(): Promise<PollListItem[]> {
@@ -65,16 +83,18 @@ export async function getPollPublic(pollId: string): Promise<PollPublic> {
 }
 
 // -------------------------------------------------------------
-// 📌 실시간 투표 결과 조회
+// 📌 실시간 투표 결과 조회 (UUID → pollIdSignal 변환 포함)
 // GET /api/polls/:pollId/results
 // -------------------------------------------------------------
 export async function getPollResults(pollId: string): Promise<PollResult> {
-  return await fetchAPI(`/api/polls/${pollId}/results`)
+  const pollIdSignal = await uuidToField(pollId)
+
+  return await fetchAPI(`/api/polls/${pollId}/results?signal=${pollIdSignal}`)
 }
 
 // -------------------------------------------------------------
 // 📌 투표 생성
-// POST /api/polls   ← 백엔드가 준 명세
+// POST /api/polls
 // -------------------------------------------------------------
 export async function createPoll(payload: {
   creatorWallet: string

@@ -4,14 +4,22 @@ import React from 'react'
 import QRCode from 'react-qr-code'
 import { useParams } from 'next/navigation'
 
-// 배포 / 로컬 자동 감지
-const BASE_URL =
-  process.env.NEXT_PUBLIC_BASE_URL || 'https://front-end-ygzm.vercel.app/'
+// 베이스 도메인
+const BASE_DOMAIN =
+  process.env.NEXT_PUBLIC_BASE_URL || 'front-end-1pu7.vercel.app'
 
 export default function QrPage() {
   const params = useParams()
   const pollId = params.pollId as string
-  const votePageUrl = `${BASE_URL}/polls/${pollId}`
+
+  // 🔥 웹 브라우저 URL
+  const webUrl = `https://${BASE_DOMAIN}/polls/${pollId}`
+
+  // 🔥 모바일 메타마스크 딥링크 URL
+  const metamaskDeepLink = `https://metamask.app.link/dapp/${BASE_DOMAIN}/polls/${pollId}`
+
+  // QR 코드에는 모바일에서도 열릴 수 있도록 딥링크 사용
+  const qrUrl = metamaskDeepLink
 
   const pageStyle: React.CSSProperties = {
     minHeight: '100vh',
@@ -65,8 +73,8 @@ export default function QrPage() {
   }
 
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(votePageUrl)
-    alert('🔗 투표 링크가 복사되었습니다!\n카톡/단체방에 공유해 주세요.')
+    navigator.clipboard.writeText(webUrl)
+    alert('🔗 웹 투표 링크가 복사되었습니다!')
   }
 
   return (
@@ -110,14 +118,22 @@ export default function QrPage() {
           <h2 style={{ margin: 0, color: '#00f2fe', fontSize: '1.2rem' }}>
             🗳️ 투표 참여하기
           </h2>
+
           <div style={{ padding: 15, background: 'white', borderRadius: 16 }}>
-            <QRCode value={votePageUrl} size={180} />
+            {/* 🔥 DeepLink QR */}
+            <QRCode value={qrUrl} size={180} />
           </div>
 
-          {/* URL 복사 버튼 */}
+          {/* 링크 복사 (웹 URL) */}
           <button onClick={copyToClipboard} style={copyBtnStyle}>
-            링크 복사 후 단체방에 공유하기 📋
+            웹 링크 복사하기 📋
           </button>
+
+          <p style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)' }}>
+            모바일: MetaMask 앱으로 자동 연결
+            <br />
+            PC: 웹 브라우저에서 링크를 사용하세요
+          </p>
         </div>
       </div>
 
@@ -128,7 +144,7 @@ export default function QrPage() {
           color: 'rgba(255,255,255,0.4)',
         }}
       >
-        스마트폰으로 스캔하거나 링크를 클릭해 투표에 참여하세요.
+        스마트폰에서 QR을 스캔하면 MetaMask 앱이 자동으로 열립니다.
       </p>
 
       <div style={{ color: '#444', fontSize: '13px', marginTop: '20px' }}>

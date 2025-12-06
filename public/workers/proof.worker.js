@@ -1,18 +1,8 @@
 /**
  * Web Worker — vote proof generator
- *
- * Input:
- *   { input, wasmPath, zkeyPath }
- *
- * Result:
- *   { ok: true, ms, proof, publicSignals }
- *   { ok: false, ms, error }
  */
 
-// snarkjs 브라우저 번들 로드 (빌드 영향 없음)
-self.importScripts(
-  'https://cdn.jsdelivr.net/npm/snarkjs@latest/dist/snarkjs.min.js'
-)
+self.importScripts('/workers/snarkjs.min.js') // ← CDN 제거, 로컬 로드
 
 self.onmessage = async (event) => {
   const started = performance.now()
